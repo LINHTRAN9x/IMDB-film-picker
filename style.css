@@ -394,7 +394,7 @@ img { display: block; }
   border-bottom: 1px solid var(--border);
 }
 #status-text { color: var(--gray); flex: 1; }
-#status-url { color: var(--border); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; }
+#status-url { color: var(--gold); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; }
 #status-count { color: var(--gold); font-weight: 700; margin-left: auto; }
 
 /* ════════════ MAIN CONTENT ════════════ */

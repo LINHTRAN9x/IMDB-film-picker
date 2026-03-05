@@ -88,25 +88,30 @@ const COUNT_OPTIONS = ['12','16','20','24','32','40','50','75','100'];
 
 const STATIC_SOURCES = {
   '⭐ Phổ biến nhất (Movie)':       {type:'movie', sort:'popularity.desc', minVotes:1000},
-  '⭐ Đánh giá cao nhất (Movie)':   {type:'movie', sort:'vote_average.desc', minVotes:50000},
+  '⭐ Đánh giá cao nhất (Movie)':   {type:'movie', sort:'vote_average.desc', minVotes:5000},
   '🆕 Mới nhất':                    {type:'movie', sort:'release_date.desc', minVotes:100},
   '🔥 Top Trending This Week':      {type:'movie', sort:'popularity.desc', year: CURRENT_YEAR},
-  [`🆕 Best of ${CURRENT_YEAR}`]:     {type:'movie', sort:'vote_average.desc', year: CURRENT_YEAR, minVotes:1000},
-  [`📅 Best of ${CURRENT_YEAR-1}`]:   {type:'movie', sort:'vote_average.desc', year: CURRENT_YEAR-1, minVotes:5000},
-  '🕰️ Best of 2010s':               {type:'movie', sort:'vote_average.desc', yearFrom:2010, yearTo:2019, minVotes:50000},
-  '📼 Best of 2000s':               {type:'movie', sort:'vote_average.desc', yearFrom:2000, yearTo:2009, minVotes:50000},
-  '📽️ Best of 1990s':               {type:'movie', sort:'vote_average.desc', yearFrom:1990, yearTo:1999, minVotes:30000},
-  '🎞️ Classics (trước 1980)':       {type:'movie', sort:'vote_average.desc', yearTo:1979, minVotes:20000},
+  [`🆕 Best of ${CURRENT_YEAR}`]:     {type:'movie', sort:'vote_average.desc', year: CURRENT_YEAR, minVotes:100},
+  [`📅 Best of ${CURRENT_YEAR-1}`]:   {type:'movie', sort:'vote_average.desc', year: CURRENT_YEAR-1, minVotes:500},
+  '🕰️ Best of 2010s':               {type:'movie', sort:'vote_average.desc', yearFrom:2010, yearTo:2019, minVotes:5000},
+  '📼 Best of 2000s':               {type:'movie', sort:'vote_average.desc', yearFrom:2000, yearTo:2009, minVotes:5000},
+  '📽️ Best of 1990s':               {type:'movie', sort:'vote_average.desc', yearFrom:1990, yearTo:1999, minVotes:3000},
+  '🎞️ Classics (trước 1980)':       {type:'movie', sort:'vote_average.desc', yearTo:1979, minVotes:100},
   '❤️ Fan Favorites (Nhiều vote)':  {type:'movie', sort:'vote_count.desc'},
   '💰 Doanh thu cao nhất':          {type:'movie', sort:'revenue.desc'},
-  '💥 Best Action':                 {type:'movie', sort:'vote_average.desc', genre:28, minVotes:50000},
-  '😂 Best Comedy':                 {type:'movie', sort:'vote_average.desc', genre:35, minVotes:30000},
-  '👻 Best Horror':                 {type:'movie', sort:'vote_average.desc', genre:27, minVotes:20000},
-  '🚀 Best Sci-Fi':                 {type:'movie', sort:'vote_average.desc', genre:878, minVotes:30000},
-  '🕵️ Best Thriller':               {type:'movie', sort:'vote_average.desc', genre:53, minVotes:30000},
-  '🧪 Best Crime':                  {type:'movie', sort:'vote_average.desc', genre:80, minVotes:30000},
-  '🧚 Best Animation':              {type:'movie', sort:'vote_average.desc', genre:16, minVotes:20000},
-  '🌍 Best Documentary':            {type:'movie', sort:'vote_average.desc', genre:99, minVotes:5000},
+  // ── STREAMING ──
+  '🔴 New on Netflix':            {type:'movie', sort:'release_date.desc',  watchProvider:8,   watchRegion:'US', minVotes:50},
+  '🔴 Popular on Netflix':        {type:'movie', sort:'popularity.desc',    watchProvider:8,   watchRegion:'US'},
+  '🔴 Best on Netflix':           {type:'movie', sort:'vote_average.desc',  watchProvider:8,   watchRegion:'US', minVotes:5000},
+  '📺 New on HBO Max':            {type:'movie', sort:'release_date.desc',  watchProvider:384, watchRegion:'US', minVotes:50},
+  '📺 Popular on HBO Max':        {type:'movie', sort:'popularity.desc',    watchProvider:384, watchRegion:'US'},
+  '🔵 New on Disney+':            {type:'movie', sort:'release_date.desc',  watchProvider:337, watchRegion:'US', minVotes:50},
+  '🔵 Popular on Disney+':        {type:'movie', sort:'popularity.desc',    watchProvider:337, watchRegion:'US'},
+  '🟡 New on Amazon Prime':       {type:'movie', sort:'release_date.desc',  watchProvider:9,   watchRegion:'US', minVotes:50},
+  '🟡 Popular on Amazon Prime':   {type:'movie', sort:'popularity.desc',    watchProvider:9,   watchRegion:'US'},
+  '⚫ New on Apple TV+':          {type:'movie', sort:'release_date.desc',  watchProvider:350, watchRegion:'US', minVotes:50},
+  '🦚 New on Peacock':            {type:'movie', sort:'release_date.desc',  watchProvider:386, watchRegion:'US', minVotes:50},
+  '🌟 New on Paramount+':         {type:'movie', sort:'release_date.desc',  watchProvider:531, watchRegion:'US', minVotes:50},
   '📡 Best TV Series':              {type:'tv',    sort:'vote_average.desc', minVotes:20000},
   '🔂 Best Mini Series':            {type:'tv',    sort:'vote_average.desc', minVotes:10000, miniSeries:true},
   [`📺 Best TV of ${CURRENT_YEAR}`]:  {type:'tv',    sort:'vote_average.desc', year:CURRENT_YEAR, minVotes:1000},
@@ -255,6 +260,8 @@ function buildDiscoverParams(cfg = {}) {
   if (cfg.yearTo)    p[cfg.type === 'tv' ? 'first_air_date.lte' : 'primary_release_date.lte'] = cfg.yearTo + '-12-31';
   if (cfg.rating)    p['vote_average.gte']        = cfg.rating;
   if (cfg.miniSeries)p['with_type']               = '3';
+  if (cfg.watchProvider) p['with_watch_providers']  = cfg.watchProvider;
+  if (cfg.watchRegion)   p['watch_region']           = cfg.watchRegion;
   return p;
 }
 
