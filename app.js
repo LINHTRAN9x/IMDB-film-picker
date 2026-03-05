@@ -487,23 +487,33 @@ async function fetchOnThisDay(month, day, yearFrom = 1980, yearTo = CURRENT_YEAR
                       : mediaTypeFilter === 'tv'    ? ['tv']
                       : mediaTypeFilter === 'mini'  ? ['tv']
                       : ['movie','tv'];
+
       for (const ep of endpoints) {
         const dateField = ep === 'movie' ? 'primary_release_date' : 'first_air_date';
         const extra = (mediaTypeFilter === 'mini') ? { with_type: '3' } : {};
-        const data = await tmdb(`/discover/${ep}`, {
-          [`${dateField}.gte`]: dateStr,
-          [`${dateField}.lte`]: dateStr,
-          sort_by: 'vote_average.desc',
-          'vote_count.gte': 100,
-          ...extra,
-        });
-        const results = data.results || [];
-        if (results.length) {
-          const best = results[0];
+        const thresholds = [1000, 800, 600, 400, 200, 100, 50, 0];
+
+        const requests = thresholds.map(minVotes =>
+          tmdb(`/discover/${ep}`, {
+            [`${dateField}.gte`]: dateStr,
+            [`${dateField}.lte`]: dateStr,
+            sort_by: 'vote_average.desc',
+            ...(minVotes > 0 ? { 'vote_count.gte': minVotes } : {}),
+            ...extra,
+          }).then(d => ({ minVotes, results: d.results || [] }))
+            .catch(() => ({ minVotes, results: [] }))
+        );
+
+        const all = await Promise.all(requests);
+        const best = all
+          .sort((a, b) => b.minVotes - a.minVotes)
+          .find(r => r.results.length > 0);
+
+        if (best) {
           return {
             year,
-            exact_date: best.release_date || best.first_air_date || dateStr,
-            movie: normalizeMovie(best, ep),
+            exact_date: best.results[0].release_date || best.results[0].first_air_date || dateStr,
+            movie: normalizeMovie(best.results[0], ep),
           };
         }
       }
@@ -511,7 +521,6 @@ async function fetchOnThisDay(month, day, yearFrom = 1980, yearTo = CURRENT_YEAR
     } catch(e) { return null; }
   };
 
-  // Parallel fetch, up to 8 at a time
   const results = [];
   for (let i = 0; i < years.length; i += 8) {
     const batch = years.slice(i, i + 8);
@@ -610,6 +619,22 @@ const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) 
 function setStatus(msg) { $('status-text').textContent = msg; }
 function setStatusCount(msg) { $('status-count').textContent = msg; }
 function setStatusUrl(msg) { $('status-url').textContent = msg; }
+
+function showToast(msg, type = 'info', icon = '💬') {
+  let container = $('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = el('div', `toast toast-${type}`);
+  toast.innerHTML = `<span class="toast-icon">${icon}</span><span class="toast-msg">${msg}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('toast-out');
+    setTimeout(() => toast.remove(), 300);
+  }, 2500);
+}
 
 function showEl(...ids) { ids.forEach(id => $(`${id}`)?.classList.remove('hidden')); }
 function hideEl(...ids) { ids.forEach(id => $(`${id}`)?.classList.add('hidden')); }
@@ -926,14 +951,55 @@ async function loadMovies() {
 function toggleWatchlist(wlId, movie, heartBtn) {
   if (STATE.watchlist[wlId]) {
     delete STATE.watchlist[wlId];
+    showToast(`Đã xóa <b>${movie.title}</b> khỏi Watchlist`, 'remove', '💔');
     if (heartBtn) { heartBtn.textContent = '🤍'; heartBtn.classList.remove('heart-pop'); }
+    // Nếu đang ở tab watchlist thì xóa card khỏi grid luôn
+    if (STATE.tab === 'watchlist') {
+      const card = heartBtn?.closest('.movie-card');
+      if (card) {
+        // Heart break animation trước
+        if (heartBtn) heartBtn.classList.add('heart-break');
+        setTimeout(() => {
+          card.classList.add('card-poof');
+          setTimeout(() => {
+            card.remove();
+            if (!Object.keys(STATE.watchlist).length) showWatchlist();
+            else setStatusCount(`${Object.keys(STATE.watchlist).length} phim yêu thích`);
+          }, 450);
+        }, 200);
+      }
+    }
   } else {
     STATE.watchlist[wlId] = movie;
+    showToast(`Đã thêm <b>${movie.title}</b> vào Watchlist`, 'add', '❤️');
     if (heartBtn) {
       heartBtn.textContent = '❤️';
-      heartBtn.classList.remove('heart-pop');
+      heartBtn.classList.remove('heart-pop', 'heart-add-pop');
       void heartBtn.offsetWidth;
-      heartBtn.classList.add('heart-pop');
+      heartBtn.classList.add('heart-add-pop');
+
+      // Sparkles xung quanh tim
+      const SPARKS = ['❤️','✨','💖','⭐','💛'];
+      for (let i = 0; i < 6; i++) {
+        const spark = document.createElement('span');
+        spark.className = 'heart-sparkle';
+        spark.textContent = SPARKS[i % SPARKS.length];
+        const angle = (i / 6) * 360;
+        const dist = 30 + Math.random() * 20;
+        spark.style.setProperty('--tx', `${Math.cos(angle * Math.PI/180) * dist}px`);
+        spark.style.setProperty('--ty', `${Math.sin(angle * Math.PI/180) * dist}px`);
+        heartBtn.appendChild(spark);
+        setTimeout(() => spark.remove(), 500);
+      }
+
+      // Card glow
+      const card = heartBtn.closest('.movie-card');
+      if (card) {
+        card.classList.remove('card-watchlist-add');
+        void card.offsetWidth;
+        card.classList.add('card-watchlist-add');
+        setTimeout(() => card.classList.remove('card-watchlist-add'), 500);
+      }
     }
   }
   saveWatchlist();
@@ -1697,10 +1763,10 @@ function runBracket(contestants) {
   let currentPool = [...contestants];
 
   const ROUNDS = [
-    { keep: 10, label: 'VÒNG 1 — VÒNG LOẠI',  color: '#4488cc' },
-    { keep: 5,  label: 'VÒNG 2 — TỨ KẾT',     color: '#9933cc' },
-    { keep: 3,  label: 'VÒNG 3 — BÁN KẾT',    color: '#cc6600' },
-    { keep: 1,  label: 'VÒNG 4 — CHUNG KẾT',  color: '#cc2222' },
+    { keep: 10, label: 'VÒNG 1 — QUALIFYING ROUND',  color: '#4488cc' },
+    { keep: 5,  label: 'VÒNG 2 — QUARTER FINALS',     color: '#9933cc' },
+    { keep: 3,  label: 'VÒNG 3 — SEMI FINALS',    color: '#cc6600' },
+    { keep: 1,  label: 'VÒNG 4 — FINAL',  color: '#cc2222' },
   ];
 
   function buildBracketCard(m) {
@@ -1824,7 +1890,7 @@ function runBracket(contestants) {
       await new Promise(resolve => {
         const rollBtn = document.createElement('button');
         rollBtn.className = 'bracket-roll-btn';
-        rollBtn.innerHTML = '🎲 ROLL — CHỌN CHAMPION';
+        rollBtn.innerHTML = '🎲 ROLL CHAMPION';
         overlay.appendChild(rollBtn);
 
         // Pulse animation cho từng card
