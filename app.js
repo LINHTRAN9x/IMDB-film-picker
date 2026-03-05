@@ -2156,22 +2156,200 @@ function showRandomPick(winner, allMovies) {
 
   // ── PHASE 1: "đang lọc ứng viên…" — show spinning cards ──
   async function phase1() {
-    phase.textContent = '⚙️ ĐANG LỌC ỨNG VIÊN...';
+    phase.textContent = '⚙️ ĐANG QUÉT TẤT CẢ PHIM...';
     phase.classList.add('glitch');
 
     cardRow.classList.remove('hidden');
     cardRow.innerHTML = '';
 
-    // Show 6 candidate cards that "flicker"
-    const candidatePool = [winner, ...decoys.slice(0, 5)].sort(() => Math.random() - 0.5);
-    const candidateCards = candidatePool.slice(0, 6).map(m => {
-      const card = buildMiniCard(m, false);
-      card.classList.add('rp-candidate');
-      cardRow.appendChild(card);
-      return { card, movie: m };
+    // ── BƯỚC 1: Vòng xoáy — cards bay vào theo spiral rồi xếp thành grid ──
+    const srcMovies = STATE.tab === 'watchlist'  ? Object.values(STATE.watchlist)
+                : STATE.tab === 'cinema'     ? STATE.cinemaMovies
+                : STATE.tab === 'onthisday'  ? (STATE.onThisDayCache || []).map(e => e.movie).filter(Boolean)
+                : STATE.movies;
+    const allPool = [...srcMovies].sort(() => Math.random() - 0.5);
+
+    const cx = window.innerWidth / 2;
+    const cy = 280;
+
+    cardRow.style.cssText = `
+      position: relative;
+      width: 100%;
+      height: 560px;
+    `;
+
+    // Tính vị trí grid cuối cùng (6 cột x 4 hàng, căn giữa)
+    const COLS = 13, CARD_W = 110, CARD_H = 130, GAP = 10;
+    const PADDING = 0;
+    const gridStartX = PADDING;
+    const gridStartY = 40;
+    const availableW = window.innerWidth - PADDING * 2;
+    // Tính lại CARD_W để lấp đầy chiều ngang
+    const CARD_W_ACTUAL = Math.floor((availableW - (COLS - 1) * GAP) / COLS);
+    const CARD_H_ACTUAL = Math.floor(CARD_W_ACTUAL * 1.2);
+
+    const getGridPos = (i) => ({
+      x: gridStartX + (i % COLS) * (CARD_W_ACTUAL + GAP),
+      y: gridStartY + Math.floor(i / COLS) * (CARD_H_ACTUAL + GAP),
     });
 
-    // Flickering highlight effect
+    // Tạo tất cả cards, bắt đầu từ vị trí xoắn ốc
+    const spiralCards = allPool.map((m, i) => {
+      const angle = i * 137.5 * (Math.PI / 180); // golden angle
+      const radius = 40 + i * 18;
+      const startX = cx + Math.cos(angle) * radius - CARD_W / 2;
+      const startY = cy + Math.sin(angle) * radius - CARD_H / 2;
+
+      const c = document.createElement('div');
+      c.style.cssText = `
+        position: absolute;
+        width: ${CARD_W}px; height: ${CARD_H}px;
+        left: ${startX}px; top: ${startY}px;
+        border-radius: 8px; overflow: hidden;
+        border: 1px solid rgba(245,197,24,0.4);
+        opacity: 0;
+        transform: scale(0.2) rotate(${Math.random()*360}deg);
+        transition: none;
+        box-shadow: 0 0 10px rgba(245,197,24,0.3);
+        z-index: 2;
+      `;
+      if (m.poster) {
+        const img = document.createElement('img');
+        img.src = m.poster;
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+        c.appendChild(img);
+      } else {
+        c.style.background = '#1a1a2e';
+        c.style.display = 'flex'; c.style.alignItems = 'center';
+        c.style.justifyContent = 'center'; c.style.fontSize = '2rem';
+        c.textContent = '🎬';
+      }
+      cardRow.appendChild(c);
+      return { el: c, startX, startY, movie: m };
+    });
+
+    // Phase A: cards xuất hiện theo xoắn ốc từ trung tâm ra
+    for (let i = 0; i < spiralCards.length; i++) {
+      if (stopped) return;
+      const { el } = spiralCards[i];
+      setTimeout(() => {
+        el.style.transition = 'opacity 0.25s ease, transform 0.35s cubic-bezier(0.34,1.56,0.64,1)';
+        el.style.opacity = '1';
+        el.style.transform = 'scale(1) rotate(0deg)';
+        // Particle nhỏ
+        const rect = el.getBoundingClientRect();
+        spawnParticles(rect.left + CARD_W/2, rect.top + CARD_H/2, 5, ['#f5c518','#fff','#44ff88']);
+      }, i * 55);
+    }
+    await sleep(spiralCards.length * 55 + 400);
+
+    // Phase B: tất cả bay vào đúng vị trí grid + auto scroll theo
+    phase.textContent = '🎯 XẾP HÀNG...';
+    spiralCards.forEach(({ el }, i) => {
+      const { x, y } = getGridPos(i);
+      el.style.transition = `left 0.55s cubic-bezier(0.4,0,0.2,1) ${i*18}ms, top 0.55s cubic-bezier(0.4,0,0.2,1) ${i*18}ms, transform 0.55s ease ${i*18}ms, box-shadow 0.3s ease`;
+      el.style.left = x + 'px';
+      el.style.top  = y + 'px';
+      el.style.transform = 'scale(1) rotate(0deg)';
+    });
+
+    // Auto scroll theo card cuối cùng đang bay xuống
+    const totalRows = Math.ceil(spiralCards.length / COLS);
+    const totalGridH = totalRows * (CARD_H_ACTUAL + GAP) + gridStartY;
+    const scrollContainer = overlay;
+    let scrollDone = false;
+    const scrollFollow = () => {
+      const totalDuration = spiralCards.length * 18 + 600;
+      const startTime = performance.now();
+      const startScroll = scrollContainer.scrollTop;
+      const endScroll = Math.max(0, totalGridH - window.innerHeight + 120);
+
+      const tick = (now) => {
+        if (stopped || scrollDone) return;
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / totalDuration, 1);
+        // easeInOutCubic
+        const ease = progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+        scrollContainer.scrollTop = startScroll + (endScroll - startScroll) * ease;
+        if (progress < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
+    scrollFollow();
+    scrollFollow();
+
+    await sleep(spiralCards.length * 18 + 600);
+    scrollDone = true;
+
+    // Phase C: quét highlight qua grid
+    phase.textContent = '⚙️ ĐANG PHÂN TÍCH...';
+    for (let round = 0; round < 14; round++) {
+      if (stopped) return;
+      spiralCards.forEach(({ el }) => {
+        el.style.boxShadow = '0 0 6px rgba(255,255,255,0.1)';
+        el.style.border = '1px solid rgba(245,197,24,0.2)';
+        el.style.transform = 'scale(1)';
+      });
+      const picks = [...spiralCards].sort(() => Math.random()-0.5).slice(0, 4);
+      picks.forEach(({ el }) => {
+        el.style.boxShadow = '0 0 22px #f5c518, 0 0 8px #fff';
+        el.style.border = '2px solid #f5c518';
+        el.style.transform = 'scale(1.08)';
+      });
+      await sleep(90);
+    }
+
+    // Phase D: tất cả thu nhỏ và biến mất
+    phase.textContent = '✅ ĐÃ CHỌN XONG!';
+    spiralCards.forEach(({ el }, i) => {
+      el.style.transition = `opacity 0.3s ease ${i*15}ms, transform 0.3s ease ${i*15}ms`;
+      el.style.opacity = '0';
+      el.style.transform = 'scale(0.5)';
+    });
+    await sleep(spiralCards.length * 15 + 350);
+    cardRow.innerHTML = '';
+    cardRow.style.cssText = '';
+    await sleep(100);
+
+    // ── BƯỚC 2: Zoom ra 6 finalist với stagger animation ──
+    phase.textContent = '🎯 ĐÃ CHỌN RA 6 ỨNG VIÊN!';
+    phase.classList.remove('glitch');
+
+    const candidatePool = [winner, ...decoys.slice(0, 5)].sort(() => Math.random() - 0.5);
+    const candidateCards = [];
+
+    for (let i = 0; i < candidatePool.length; i++) {
+      const card = buildMiniCard(candidatePool[i], false);
+      card.classList.add('rp-candidate');
+      card.style.opacity = '0';
+      card.style.transform = 'scale(0) rotate(-15deg)';
+      card.style.transition = `opacity 0.35s ease ${i * 80}ms, transform 0.35s cubic-bezier(0.34,1.56,0.64,1) ${i * 80}ms`;
+      cardRow.appendChild(card);
+      candidateCards.push({ card, movie: candidatePool[i] });
+
+      // Spawn particles từ vị trí card
+      setTimeout(() => {
+        const rect = card.getBoundingClientRect();
+        spawnParticles(rect.left + rect.width/2, rect.top + rect.height/2, 12,
+          ['#f5c518','#fff','#44ff88']);
+      }, i * 80 + 100);
+    }
+
+    // Trigger animation
+    await sleep(50);
+    candidateCards.forEach(({ card }) => {
+      card.style.opacity = '1';
+      card.style.transform = 'scale(1) rotate(0deg)';
+    });
+
+    await sleep(candidatePool.length * 80 + 400);
+
+    // ── BƯỚC 3: Flickering highlight như cũ ──
+    phase.textContent = '⚙️ ĐANG LỌC ỨNG VIÊN...';
+    phase.classList.add('glitch');
+
     const FLICKER_COLORS = ['#f5c518','#e50914','#44ff88','#4488ff','#ff44cc'];
     let fi = 0;
     const flickerTimer = setInterval(() => {
@@ -2179,24 +2357,23 @@ function showRandomPick(winner, allMovies) {
       const active = Math.floor(Math.random() * candidateCards.length);
       candidateCards[active].card.classList.add('rp-highlighted');
       candidateCards[active].card.style.setProperty('--hl-color', FLICKER_COLORS[fi % FLICKER_COLORS.length]);
-      // Mini sparks from highlighted card
       const rect = candidateCards[active].card.getBoundingClientRect();
       spawnParticles(rect.left + rect.width/2, rect.top + rect.height/2, 4, ['#f5c518','#fff']);
       fi++;
     }, 120);
 
-    await sleep(5000);
+    await sleep(3000);
     clearInterval(flickerTimer);
     candidateCards.forEach(({ card }) => card.classList.remove('rp-highlighted'));
 
-    // Eliminate decoys one by one
+    // ── BƯỚC 4: Loại dần ──
     phase.textContent = '🔥 ĐANG LOẠI DẦN...';
     phase.classList.remove('glitch');
 
     const order = candidateCards
       .filter(c => (c.movie.tmdb_id || c.movie.title) !== (winner.tmdb_id || winner.title))
       .sort(() => Math.random() - 0.5)
-      .slice(0, 3);  // ← chỉ loại 3, giữ lại 3
+      .slice(0, 3);
 
     const survivors = candidateCards.filter(c => !order.includes(c));
 
@@ -2204,31 +2381,25 @@ function showRandomPick(winner, allMovies) {
       await sleep(500);
       card.classList.add('rp-eliminated');
       const rect = card.getBoundingClientRect();
-      spawnParticles(rect.left + rect.width/2, rect.top + rect.height/2, 10, ['#e50914','#ff4444','#aa0000']);
-      await sleep(400);  // ← chờ animation kết thúc rồi xóa khỏi DOM luôn
+      spawnParticles(rect.left + rect.width/2, rect.top + rect.height/2, 10,
+        ['#e50914','#ff4444','#aa0000']);
+      await sleep(400);
       card.style.visibility = 'hidden';
     }
 
-
-
-    // Lúc này chỉ còn winner card trên màn hình
-    // Highlight 3 survivors còn lại
     survivors.forEach(({ card }) => {
       card.classList.add('rp-highlighted');
       card.style.setProperty('--hl-color', '#f5c518');
     });
     await sleep(1200);
 
-    // Chờ user bấm ROLL
+    // ── BƯỚC 5: ROLL button ──
     await new Promise(resolve => {
       const rollBtn = document.createElement('button');
       rollBtn.className = 'rp-roll-btn';
-      rollBtn.innerHTML = '🎰 ROLL — XÁC ĐỊNH WINNER';
+      rollBtn.innerHTML = '🎰 ROLL WINNER';
       overlay.appendChild(rollBtn);
-      rollBtn.addEventListener('click', () => {
-        rollBtn.remove();
-        resolve();
-      });
+      rollBtn.addEventListener('click', () => { rollBtn.remove(); resolve(); });
     });
 
     cardRow.classList.add('hidden');
@@ -2240,8 +2411,7 @@ function showRandomPick(winner, allMovies) {
   async function phase2(survivors) {
     // Dùng đúng 3 survivors thay vì spinPool
     const reelMovies = [...survivors].sort(() => Math.random() - 0.5);
-    const winnerIdx = reelMovies.findIndex(m => (m.tmdb_id || m.title) === (winner.tmdb_id || winner.title));
-    if (winnerIdx !== 2) [reelMovies[winnerIdx], reelMovies[2]] = [reelMovies[2], reelMovies[winnerIdx]];
+    const winnerReelIdx = reelMovies.findIndex(m => (m.tmdb_id || m.title) === (winner.tmdb_id || winner.title));
     phase.textContent = '🎰 XÁC NHẬN...';
     slotMachine.classList.remove('hidden');
     slotMachine.classList.add('slot-enter');
@@ -2289,7 +2459,7 @@ function showRandomPick(winner, allMovies) {
             $(`slot-reel-${ri}`).classList.add('slot-locked');
             const cx = $(`slot-reel-${ri}`).getBoundingClientRect();
             spawnParticles(cx.left + cx.width/2, cx.top + cx.height/2, 18,
-              ri === 3 ? ['#f5c518','#ffe066','#ffffff','#ffcc00'] : ['#44ff88','#00cc66']);
+              ri === winnerReelIdx + 1 ? ['#f5c518','#ffe066','#ffffff','#ffcc00'] : ['#44ff88','#00cc66']);
             resolve();
             return;
           }
@@ -2310,8 +2480,55 @@ function showRandomPick(winner, allMovies) {
     }));
 
     await Promise.all(spinPromises);
-    await sleep(1000);
+    await sleep(600);
+
+    // Loại reel 1 và 2 (winner luôn ở reel 3)
+    const loserReels = [1, 2, 3].filter(ri => ri - 1 !== winnerReelIdx);
+    for (const ri of loserReels) {
+      await sleep(400);
+      const reel = $(`slot-reel-${ri}`);
+      // Flash đỏ 3 lần
+      for (let f = 0; f < 3; f++) {
+        reel.style.transition = 'border-color 0.08s, box-shadow 0.08s';
+        reel.style.borderColor = '#ff2222';
+        reel.style.boxShadow = '0 0 24px rgba(255,0,0,0.9)';
+        await sleep(80);
+        reel.style.borderColor = '#2a2a4a';
+        reel.style.boxShadow = 'none';
+        await sleep(80);
+      }
+      // Bay ra ngoài
+      reel.style.transition = 'transform 0.4s ease, opacity 0.4s ease, filter 0.3s ease';
+      reel.style.filter = 'brightness(2) saturate(0)';
+      reel.style.transform = ri === 1 ? 'translateX(-300px) rotate(-15deg) scale(0.3)' : 'translateX(300px) rotate(15deg) scale(0.3)';
+      reel.style.opacity = '0';
+      const rect = reel.getBoundingClientRect();
+      spawnParticles(rect.left + rect.width/2, rect.top + rect.height/2, 20,
+        ['#ff2222','#ff6644','#aa0000','#fff']);
+      await sleep(450);
+    }
+
+    // Winner reel (reel 3) phát sáng và di chuyển vào giữa
+    const winnerReel = $(`slot-reel-${winnerReelIdx + 1}`);
+    winnerReel.style.transition = 'transform 0.5s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s, border-color 0.3s';
+    winnerReel.style.borderColor = '#f5c518';
+    winnerReel.style.boxShadow = '0 0 40px rgba(245,197,24,0.9), 0 0 80px rgba(245,197,24,0.4)';
+    winnerReel.style.transform = 'scale(1.15)';
+    const wr = winnerReel.getBoundingClientRect();
+    spawnParticles(wr.left + wr.width/2, wr.top + wr.height/2, 40,
+      ['#f5c518','#ffe066','#fff','#ffcc00','#44ff88']);
+    await sleep(800);
+
     slotMachine.classList.add('hidden');
+    // Reset styles
+    [1,2,3].forEach(ri => {
+      const r = $(`slot-reel-${ri}`);
+      r.classList.remove('slot-locked');
+      r.style.transform = ''; r.style.opacity = ''; r.style.filter = '';
+      r.style.borderColor = ''; r.style.boxShadow = ''; r.style.transition = '';
+      $(`slot-inner-${ri}`).style.transform = '';
+      $(`slot-inner-${ri}`).style.transition = '';
+    });
     [1,2,3].forEach(ri => {
       $(`slot-reel-${ri}`).classList.remove('slot-locked');
       $(`slot-inner-${ri}`).style.transform = '';
@@ -2458,7 +2675,7 @@ function buildWinnerCard(m) {
       </div>
     </div>
     <div class="rp-winner-info">
-      <div class="rp-winner-label">PHIM ĐƯỢC CHỌN</div>
+      <div class="rp-winner-label">WINNER FILM</div>
       <div class="rp-winner-title">${sanitize(m.title)}</div>
       <div class="rp-winner-meta">
         <span class="rp-winner-rating" style="background:${ratingBg(m.rating)};color:${ratingFg(m.rating)}">⭐ ${m.rating}</span>
@@ -2538,7 +2755,16 @@ function setupSearch() {
 function showAutocomplete(results) {
   const dropdown = $('autocomplete-dropdown');
   if (!results.length) { dropdown.classList.add('hidden'); return; }
+  // Move ra body để thoát khỏi stacking context của .fullpage
+  if (dropdown.parentElement !== document.body) {
+    document.body.appendChild(dropdown);
+  }
   dropdown.innerHTML = '';
+  // Tính vị trí theo input
+  const inputRect = $('search-input').getBoundingClientRect();
+  dropdown.style.top  = (inputRect.bottom + 4) + 'px';
+  dropdown.style.left = inputRect.left + 'px';
+  dropdown.style.width = Math.max(inputRect.width, 480) + 'px';
   acIdx = -1;
   results.forEach(r => {
     const item = el('div', 'ac-item');
@@ -2562,6 +2788,16 @@ function highlightAc(items) {
 
 async function searchByTitle(title, tmdbId, mediaType = 'movie') {
   if (!STATE.tmdbKey) { openTmdbModal(); return; }
+  
+  // Đóng detail page nếu đang mở
+  $('detail-page').classList.add('hidden');
+  $('actor-page').classList.add('hidden');
+  $('director-page').classList.add('hidden');
+  STATE.tab = 'browse';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'browse'));
+  $('filter-panel').style.display = '';
+  $('movie-grid').style.display = '';
+
   setStatus(`⏳ Tìm "${title}"...`);
   setStatusCount('');
   createSkeletons(12);
